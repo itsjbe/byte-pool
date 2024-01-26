@@ -9,7 +9,7 @@ pub trait Poolable {
 
 impl<T: Default + Clone> Poolable for Vec<T> {
     fn capacity(&self) -> usize {
-        self.len()
+        self.capacity()
     }
 
     fn alloc(size: usize) -> Self {
@@ -23,7 +23,7 @@ where
     S: BuildHasher + Default,
 {
     fn capacity(&self) -> usize {
-        self.len()
+        self.capacity()
     }
 
     fn alloc(size: usize) -> Self {

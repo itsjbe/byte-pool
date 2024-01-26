@@ -4,6 +4,7 @@ use std::ops::{Deref, DerefMut};
 use std::ptr;
 
 use crossbeam_queue::SegQueue;
+use log::{trace, warn};
 use stable_deref_trait::StableDeref;
 
 use crate::poolable::{Poolable, Realloc};
@@ -51,6 +52,25 @@ impl<T: Poolable> BytePool<T> {
         BytePool::default()
     }
 
+    pub fn alloc_by_capacity(&self, cap: usize) -> Block<'_, T> {
+        assert!(cap > 0, "Can not allocate empty blocks");
+
+        // check the last 4 blocks
+        let list = if cap < SPLIT_SIZE {
+            &self.list_small
+        } else {
+            &self.list_large
+        };
+
+        if let Some(value) = self.alloc_block(cap, list) {
+            return value;
+        }
+
+        // allocate a new block
+        let data = T::alloc(cap);
+        Block::new(data, self)
+    }
+
     /// Allocates a new `Block`, which represents a fixed sice byte slice.
     /// If `Block` is dropped, the memory is _not_ freed, but rather it is returned into the pool.
     /// The returned `Block` contains arbitrary data, and must be zeroed or overwritten,
@@ -64,16 +84,12 @@ impl<T: Poolable> BytePool<T> {
         } else {
             &self.list_large
         };
-        if let Some(el) = list.pop() {
-            if el.capacity() == size {
-                // found one, reuse it
-                return Block::new(el, self);
-            } else {
-                // put it back
-                list.push(el);
-            }
+
+        if let Some(value) = self.alloc_block(size, list) {
+            return value;
         }
 
+        warn!("Allocating a new block");
         // allocate a new block
         let data = T::alloc(size);
         Block::new(data, self)
@@ -85,6 +101,20 @@ impl<T: Poolable> BytePool<T> {
         } else {
             self.list_large.push(block);
         }
+    }
+
+    fn alloc_block(&self, cap: usize, list: &SegQueue<T>) -> Option<Block<T>> {
+        if let Some(el) = list.pop() {
+            if el.capacity() == cap {
+                trace!("Reusing block with {cap} cap");
+                // found one, reuse it
+                return Some(Block::new(el, self));
+            } else {
+                // put it back
+                list.push(el);
+            }
+        }
+        None
     }
 }
 
